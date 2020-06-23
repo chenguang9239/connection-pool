@@ -1,0 +1,12 @@
+//
+// Created by admin on 2020-06-16.
+//
+
+#ifndef CONNECTION_POOL_THRIFTCONNECTION_H
+#define CONNECTION_POOL_THRIFTCONNECTION_H
+
+class ThriftConnection {
+
+};
+
+#endif //CONNECTION_POOL_THRIFTCONNECTION_H
