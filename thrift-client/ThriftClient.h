@@ -30,9 +30,9 @@ class ThriftClient : public Connection {
   TransportPtr transport_ptr_;
 };
 
-class ThriftClientFactory : public ConnectionFactory {
+class ThriftClientFactory : public ConnectionFactory<ThriftClient> {
  public:
-  virtual std::shared_ptr<Connection> Create(const ConnectionParam &conn_param);
+  virtual std::shared_ptr<ThriftClient> Create(const ConnectionParam &conn_param);
 };
 
 }  // namespace ww

@@ -24,17 +24,22 @@ struct ConnectionParam {
 
 class Connection {
  public:
-  Connection(){};
-  virtual ~Connection(){};
-  void MoreBaseClassMemberFunctions(){};
+  Connection() {}
+  virtual ~Connection() {}
+  void MoreBaseClassMemberFunctions() {}
 
   bool state;
 };
 
+template <class T>
 class ConnectionFactory {
  public:
-  virtual std::shared_ptr<Connection> Create(
+  virtual std::shared_ptr<T> Create(
       const ConnectionParam& conn_param) = 0;
+  //      {
+  //    return std::make_shared<Connection>();
+  //  }
+  virtual ~ConnectionFactory() {}
 };
 
 }  // namespace ww

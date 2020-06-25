@@ -38,18 +38,18 @@ class ConnectionPool {
     return ConnectionPoolStats(pool_.size(), borrowed_.size());
   };
 
-  ConnectionPool(const std::shared_ptr<ConnectionFactory> factory,
+  ConnectionPool(const std::shared_ptr<ConnectionFactory<T>> factory,
                  const ConnectionPoolParam& conn_pool_param)
       : factory_(factory), conn_pool_param_(conn_pool_param) {
     while (pool_.size() < conn_pool_param_.init_size) {
       // 检查有效性
-      pool_.push_back(factory_->create());
+      pool_.emplace_back(factory_->Create(conn_pool_param_.conn_param));
     }
   };
 
   ~ConnectionPool(){};
 
-  std::shared_ptr<T> borrow() {
+  std::shared_ptr<T> Borrow() {
     std::lock_guard<std::mutex> lock(mtx_);
 
     std::shared_ptr<T> conn = nullptr;
@@ -59,7 +59,7 @@ class ConnectionPool {
       pool_.pop_front();
       borrowed_.insert(conn);
     } else if (borrowed_.size() < conn_pool_param_.max_size) {
-      conn = factory_->create();
+      conn = factory_->Create(conn_pool_param_.conn_param);
       // 检查有效性
       borrowed_.insert(conn);
     } else {
@@ -69,17 +69,17 @@ class ConnectionPool {
     return conn;
   };
 
-  void relase(std::shared_ptr<T> conn) {
+  void Relase(std::shared_ptr<T> conn) {
     std::lock_guard<std::mutex> lock(mtx_);
     pool_.push_back(conn);
     borrowed_.erase(conn);
   };
 
  protected:
-  std::shared_ptr<ConnectionFactory> factory_;
+  std::shared_ptr<ConnectionFactory<T>> factory_;
   ConnectionPoolParam conn_pool_param_;
   std::deque<std::shared_ptr<T> > pool_;
-  std::set<std::shared_ptr<Connection> > borrowed_;
+  std::set<std::shared_ptr<T> > borrowed_;
   std::mutex mtx_;
 };
 

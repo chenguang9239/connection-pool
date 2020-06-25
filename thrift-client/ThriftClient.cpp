@@ -37,7 +37,7 @@ ThriftClient::ThriftClient(const ConnectionParam &conn_param) {
   }
 }
 
-std::shared_ptr<Connection> ThriftClientFactory::Create(
+std::shared_ptr<ThriftClient> ThriftClientFactory::Create(
     const ConnectionParam &conn_param) {
   return std::make_shared<ThriftClient>(conn_param);
 }

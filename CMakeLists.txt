@@ -16,6 +16,7 @@ include_directories(${SRC_ROOT}/thrift-client)
 include_directories(${SRC_ROOT}/utils)
 include_directories(${SRC_ROOT}/zk-children-watcher)
 include_directories(${SRC_ROOT}/log)
+include_directories(${SRC_ROOT}/utils)
 include_directories(${DEPEND_INC})
 
 
@@ -32,6 +33,7 @@ file(GLOB SOURCE_FILES
 		"${SRC_ROOT}/thrift-client/*.cpp"
 		"${SRC_ROOT}/utils/*.cpp"
 		"${SRC_ROOT}/zk-children-watcher/*.cpp"
+		"${SRC_ROOT}/test/*.cpp"
 		)
 
 #add_custom_target(compile_thrift

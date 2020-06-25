@@ -70,7 +70,7 @@ class ZKChildrenWatcher {
   CppZooKeeper::ScopedStringVector string_vector_;
 
   bool need_init_value_list_;
-  boost::shared_mutex node_value_list_smtx;
+  boost::shared_mutex node_value_list_smtx_;
 
   std::vector<std::string> node_value_list_;
   std::vector<std::string> additional_value_list_;
@@ -85,7 +85,7 @@ class ZKChildrenWatcher {
 };
 
 template <class T>
-bool ZKChildrenWatcher<T>::globalWatcherFunc(
+bool ZKChildrenWatcher<T>::GlobalWatcherFunc(
     CppZooKeeper::ZookeeperManager &zk_cli, int type, int state,
     const char *path) {
   if (type == ZOO_SESSION_EVENT) {
@@ -164,7 +164,7 @@ void ZKChildrenWatcher<T>::InitValueList() {
   zk_client_.GetChildren(
       config_.path, string_vector_,
       std::make_shared<CppZooKeeper::WatcherFuncType>(
-          std::bind(&ZKChildrenWatcher::watcherFunc, this,
+          std::bind(&ZKChildrenWatcher::WatcherFunc, this,
                     std::placeholders::_1, std::placeholders::_2,
                     std::placeholders::_3, std::placeholders::_4)));
 
@@ -190,12 +190,13 @@ void ZKChildrenWatcher<T>::InitValueList() {
     LOG_SPCL << "to be deleted value: " << e;
   }
 
-  cast().ZKChildrenHandler();
+  Cast().ZKChildrenHandler();
 
   if (!additional_value_list_.empty() || !deleted_value_list_.empty()) {
-    boost::unique_lock<boost::shared_mutex> g(node_value_list_smtx);
+    boost::unique_lock<boost::shared_mutex> g(node_value_list_smtx_);
     // 先删除， 后追加
-    Utils::UpdateVector(node_value_list_, additional_value_list_,
+    auto tmp = node_value_list_;
+    Utils::UpdateVector(node_value_list_, additional_value_list_, tmp,
                         deleted_value_list_);
   }
 
@@ -205,12 +206,12 @@ void ZKChildrenWatcher<T>::InitValueList() {
 }
 
 template <class T>
-ZKChildrenWatcher::ZKChildrenWatcher(const ZKConfig &ZKConfig)
+ZKChildrenWatcher<T>::ZKChildrenWatcher(const ZKConfig &ZKConfig)
     : config_(ZKConfig) {
   need_init_value_list_ = true;
   global_watcher_ptr_ =
       std::make_shared<CppZooKeeper::WatcherFuncType>(std::bind(
-          &ZKChildrenWatcher::globalWatcherFunc, this, std::placeholders::_1,
+          &ZKChildrenWatcher::GlobalWatcherFunc, this, std::placeholders::_1,
           std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
   reconnect_notifier_ =
       std::bind(&ZKChildrenWatcher::InnerReconnectNotifier, this);

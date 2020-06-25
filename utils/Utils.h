@@ -22,6 +22,7 @@ class Utils {
 
   template <class T>
   static void UpdateVector(std::vector<T> &input, std::vector<T> &add,
+                           std::vector<std::string> &origin,
                            std::vector<std::string> &del, bool debug = false);
 
   static std::vector<std::string> Split(const std::string &target,
@@ -45,12 +46,14 @@ std::vector<T> Utils::VectorMinus(const std::vector<T> &a,
 }
 
 template <class T>
-std::unordered_set<T> Utils::VectorToUSet(const std::vector<T> &a) {
+std::unordered_set<T> Utils::VectorToUSet(
+    const std::vector<T> &a) {
   return std::unordered_set<T>(a.begin(), a.end());
 }
 
 template <class T>
 void Utils::UpdateVector(std::vector<T> &input, std::vector<T> &add,
+                         std::vector<std::string> &origin,
                          std::vector<std::string> &del, bool debug) {
   if (!input.empty() && !del.empty()) {
     size_t old_size = input.size();
@@ -58,7 +61,7 @@ void Utils::UpdateVector(std::vector<T> &input, std::vector<T> &add,
 
     auto finder = VectorToUSet(del);
     for (size_t i = 0; i < tmp_size;) {
-      if (finder.count(input[i]) > 0)
+      if (finder.count(origin[i]) > 0)
         input[i] = std::move(input[--tmp_size]);
       else
         ++i;
