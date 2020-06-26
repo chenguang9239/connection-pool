@@ -1,7 +1,3 @@
-//
-// Created by admin on 2020-06-25.
-//
-
 #include "RoundRobin.h"
 
 RoundRobin::RoundRobin() {

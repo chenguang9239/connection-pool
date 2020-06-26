@@ -1,7 +1,3 @@
-//
-// Created by admin on 2020-06-18.
-//
-
 #include <iostream>
 
 #include "MultiConnectionPool.h"
@@ -23,10 +19,10 @@ int main() {
   ww::RRConnectionPool<ww::ThriftClient, ww::ThriftClientFactory> rr_conn_pool(
       multi_conn_pool_param);
 
-  rr_conn_pool.GetNextItem();
+  rr_conn_pool.GetNextConn();
 
   std::cout << "Predict result: "
-            << rr_conn_pool.GetNextItem()->client_ptr_->Predict(3) << std::endl;
+            << rr_conn_pool.GetNextConn()->client_ptr_->Predict(3) << std::endl;
 
   return 0;
 }

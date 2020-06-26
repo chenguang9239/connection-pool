@@ -1,7 +1,3 @@
-//
-// Created by admin on 2020-06-23.
-//
-
 #ifndef CONNECTION_POOL_LOG_H
 #define CONNECTION_POOL_LOG_H
 

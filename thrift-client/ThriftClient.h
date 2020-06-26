@@ -1,7 +1,3 @@
-//
-// Created by admin on 2020-06-18.
-//
-
 #ifndef CONNECTION_POOL_THRIFTCLIENT_H
 #define CONNECTION_POOL_THRIFTCLIENT_H
 
@@ -32,7 +28,8 @@ class ThriftClient : public Connection {
 
 class ThriftClientFactory : public ConnectionFactory<ThriftClient> {
  public:
-  virtual std::shared_ptr<ThriftClient> Create(const ConnectionParam &conn_param);
+  virtual ThriftClient *Create(const ConnectionParam &conn_param);
+  virtual void Destroy(ThriftClient *p);
 };
 
 }  // namespace ww

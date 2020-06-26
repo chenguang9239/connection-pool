@@ -1,19 +1,16 @@
-//
-// Created by admin on 2019-01-15.
-//
-
-#ifndef CPPSERVER_ZKCHILDRENWATCHER_H
-#define CPPSERVER_ZKCHILDRENWATCHER_H
+#ifndef CONNECTION_POOL_ZK_CHILDREN_WATCHER_H
+#define CONNECTION_POOL_ZK_CHILDREN_WATCHER_H
 
 #include <CppZooKeeper/CppZooKeeper.h>
 
 #include <atomic>
+#include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/trim.hpp>
 #include <boost/thread/shared_mutex.hpp>
 #include <functional>
 #include <memory>
+#include <unordered_set>
 
-#include "Utils.h"
 #include "ZKConfig.h"
 #include "log.h"
 
@@ -64,6 +61,28 @@ class ZKChildrenWatcher {
   void ZKChildrenHandler();
 
   T &Cast() { return static_cast<T &>(*this); }
+
+  static std::vector<std::string> VectorMinus(
+      const std::vector<std::string> &a, const std::vector<std::string> &b);
+
+  static std::unordered_set<std::string> VectorToUSet(
+      const std::vector<std::string> &a);
+
+  template <class P>
+  static void UpdateVector(
+      std::vector<P> &items, boost::shared_mutex &items_mtx,
+      std::vector<std::string> &origin, std::vector<std::string> &add,
+      std::vector<std::string> &del,
+      std::function<P(const std::string &)> builder = nullptr,
+      bool debug = true);
+
+  static void UpdateNodeList(std::vector<std::string> &items,
+                             boost::shared_mutex &items_mtx,
+                             std::vector<std::string> &add,
+                             std::vector<std::string> &del, bool debug = true);
+
+  static std::vector<std::string> Split(const std::string &items,
+                                        const std::string &with = ":");
 
   ZKConfig config_;
   CppZooKeeper::ZookeeperManager zk_client_;
@@ -178,10 +197,8 @@ void ZKChildrenWatcher<T>::InitValueList() {
              << ", node data: " << new_node_value_list.back();
   }
 
-  additional_value_list_ =
-      Utils::VectorMinus(new_node_value_list, node_value_list_);
-  deleted_value_list_ =
-      Utils::VectorMinus(node_value_list_, new_node_value_list);
+  additional_value_list_ = VectorMinus(new_node_value_list, node_value_list_);
+  deleted_value_list_ = VectorMinus(node_value_list_, new_node_value_list);
 
   for (const auto &e : additional_value_list_) {
     LOG_SPCL << "to be added value: " << e;
@@ -193,11 +210,9 @@ void ZKChildrenWatcher<T>::InitValueList() {
   Cast().ZKChildrenHandler();
 
   if (!additional_value_list_.empty() || !deleted_value_list_.empty()) {
-    boost::unique_lock<boost::shared_mutex> g(node_value_list_smtx_);
     // 先删除， 后追加
-    auto tmp = node_value_list_;
-    Utils::UpdateVector(node_value_list_, additional_value_list_, tmp,
-                        deleted_value_list_);
+    UpdateNodeList(node_value_list_, node_value_list_smtx_,
+                   additional_value_list_, deleted_value_list_);
   }
 
   LOG_SPCL << "zkPath: " << config_.path
@@ -275,6 +290,130 @@ void ZKChildrenWatcher<T>::InnerResumeEphemeralNodeNotifier() {
            << ", zk path: " << config_.path;
 }
 
+template <class T>
+std::vector<std::string> ZKChildrenWatcher<T>::VectorMinus(
+    const std::vector<std::string> &a, const std::vector<std::string> &b) {
+  std::vector<std::string> res;
+  std::unordered_set<std::string> finder(b.begin(), b.end());
+
+  // in a, not in b
+  for (auto &e : a) {
+    if (finder.count(e) <= 0) res.emplace_back(e);
+  }
+
+  return res;
+}
+
+template <class T>
+std::unordered_set<std::string> ZKChildrenWatcher<T>::VectorToUSet(
+    const std::vector<std::string> &a) {
+  return std::unordered_set<std::string>(a.begin(), a.end());
+}
+
+template <class T>
+template <class P>
+void ZKChildrenWatcher<T>::UpdateVector(
+    std::vector<P> &items, boost::shared_mutex &items_mtx,
+    std::vector<std::string> &origin, std::vector<std::string> &add,
+    std::vector<std::string> &del,
+    std::function<P(const std::string &)> builder, bool debug) {
+  std::vector<P> additional_items;
+  for (auto &value : add) {
+    if (value.empty()) {
+      LOG_ERROR << "zk node value empty! zk node value list size: "
+                << origin.size();
+      continue;
+    }
+    if (builder) {
+      additional_items.emplace_back(builder(value));
+      LOG_INFO << "add new item ok: " << value;
+    } else {
+      LOG_ERROR << "builder is nullptr!";
+    }
+  }
+
+  if (add.size() != additional_items.size()) {
+    LOG_ERROR << "create new item(s) error, addition node(s) count: "
+              << add.size()
+              << ", additional item(s) count: " << additional_items.size();
+  }
+
+  boost::unique_lock<boost::shared_mutex> g(items_mtx);
+
+  if (!items.empty() && !del.empty()) {
+    size_t old_size = items.size();
+    size_t tmp_size = old_size;
+
+    auto finder = VectorToUSet(del);
+    for (size_t i = 0; i < tmp_size;) {
+      if (finder.count(origin[i]) > 0)
+        items[i] = std::move(items[--tmp_size]);
+      else
+        ++i;
+    }
+    items.resize(tmp_size);
+    if (debug) {
+      LOG_SPCL << "delete " << old_size - old_size + 1 << " item(s)";
+    }
+  }
+
+  if (!additional_items.empty()) {
+    size_t append_size = additional_items.size();
+    std::move(additional_items.begin(), additional_items.end(),
+              std::inserter(items, items.end()));
+    if (debug) {
+      LOG_SPCL << "append " << append_size << " new item(s)";
+    }
+  }
+}
+
+template <class T>
+void ZKChildrenWatcher<T>::UpdateNodeList(std::vector<std::string> &items,
+                                          boost::shared_mutex &items_mtx,
+                                          std::vector<std::string> &add,
+                                          std::vector<std::string> &del,
+                                          bool debug) {
+  boost::unique_lock<boost::shared_mutex> g(items_mtx);
+
+  if (!items.empty() && !del.empty()) {
+    size_t old_size = items.size();
+    size_t tmp_size = old_size;
+
+    auto finder = VectorToUSet(del);
+    for (size_t i = 0; i < tmp_size;) {
+      if (finder.count(items[i]) > 0)
+        items[i] = std::move(items[--tmp_size]);
+      else
+        ++i;
+    }
+    items.resize(tmp_size);
+    if (debug) {
+      LOG_SPCL << "delete " << old_size - old_size + 1 << " node(s)";
+    }
+  }
+
+  if (!add.empty()) {
+    size_t append_size = add.size();
+    std::move(add.begin(), add.end(), std::inserter(items, items.end()));
+    if (debug) {
+      LOG_SPCL << "append " << append_size << " new node(s)";
+    }
+  }
+}
+
+template <class T>
+std::vector<std::string> ZKChildrenWatcher<T>::Split(const std::string &target,
+                                                     const std::string &with) {
+  std::vector<std::string> res;
+  if (target.empty()) return res;
+  std::string tmp = target;
+  boost::algorithm::trim_if(tmp, boost::algorithm::is_any_of(with));
+  boost::algorithm::split(res, tmp, boost::algorithm::is_any_of(with),
+                          boost::algorithm::token_compress_on);
+
+  return res;
+}
+
 }  // namespace ww
 
-#endif  // CPPSERVER_ZKCHILDRENWATCHER_H
+#endif  // CONNECTION_POOL_ZK_CHILDREN_WATCHER_H

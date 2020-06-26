@@ -1,7 +1,3 @@
-//
-// Created by admin on 2020-06-18.
-//
-
 #include "ThriftClient.h"
 
 #include <thrift/protocol/TBinaryProtocol.h>
@@ -37,9 +33,10 @@ ThriftClient::ThriftClient(const ConnectionParam &conn_param) {
   }
 }
 
-std::shared_ptr<ThriftClient> ThriftClientFactory::Create(
-    const ConnectionParam &conn_param) {
-  return std::make_shared<ThriftClient>(conn_param);
+ThriftClient *ThriftClientFactory::Create(const ConnectionParam &conn_param) {
+  return new ThriftClient(conn_param);
 }
+
+void ThriftClientFactory::Destroy(ThriftClient *p) { delete p; }
 
 }  // namespace ww

@@ -1,9 +1,5 @@
-//
-// Created by admin on 2019-01-14.
-//
-
-#ifndef CPPSERVER_ZKCONFIG_H
-#define CPPSERVER_ZKCONFIG_H
+#ifndef CONNECTION_POOL_ZKCONFIG_H
+#define CONNECTION_POOL_ZKCONFIG_H
 
 #include <string>
 
@@ -36,4 +32,4 @@ public:
 };
 
 
-#endif //CPPSERVER_ZKCONFIG_H
+#endif //CONNECTION_POOL_ZKCONFIG_H

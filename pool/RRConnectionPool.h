@@ -1,7 +1,3 @@
-//
-// Created by admin on 2020-06-16.
-//
-
 #ifndef CONNECTION_POOL_RRCONNECTIONPOOL_H
 #define CONNECTION_POOL_RRCONNECTIONPOOL_H
 
@@ -15,7 +11,7 @@ class RRConnectionPool : public RoundRobin, MultiConnectionPool<CONN, FACTORY> {
 
  public:
   RRConnectionPool(const MultiConnectionPoolParam &MultiConnectionPoolParam);
-  virtual std::shared_ptr<CONN> GetNextItem();
+  virtual std::shared_ptr<CONN> GetNextConn();
 
  private:
 };
@@ -26,12 +22,12 @@ RRConnectionPool<CONN, FACTORY>::RRConnectionPool(
     : PoolType(MultiConnectionPoolParam) {}
 
 template <class CONN, class FACTORY>
-std::shared_ptr<CONN> RRConnectionPool<CONN, FACTORY>::GetNextItem() {
-  boost::shared_lock<boost::shared_mutex> g(PoolType::pools_smtx_);
-  if (PoolType::pools_.empty()) {
+std::shared_ptr<CONN> RRConnectionPool<CONN, FACTORY>::GetNextConn() {
+  boost::shared_lock<boost::shared_mutex> g(this->pools_smtx_);
+  if (this->pools_.empty()) {
     return nullptr;
   }
-  return PoolType::pools_[GetNext(PoolType::pools_.size())]->Borrow();
+  return this->pools_[GetNext(this->pools_.size())]->Borrow();
 }
 
 }  // namespace ww

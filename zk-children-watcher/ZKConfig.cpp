@@ -1,7 +1,3 @@
-//
-// Created by admin on 2019-01-14.
-//
-
 #include "ZKConfig.h"
 #include "limits.h"
 

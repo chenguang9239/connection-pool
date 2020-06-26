@@ -1,7 +1,3 @@
-//
-// Created by admin on 2020-06-25.
-//
-
 #ifndef CONNECTION_POOL_ROUNDROBIN_H
 #define CONNECTION_POOL_ROUNDROBIN_H
 
