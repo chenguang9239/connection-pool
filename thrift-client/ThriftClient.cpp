@@ -27,6 +27,8 @@ ThriftClient::ThriftClient(const ConnectionParam &conn_param) {
     t_socket->setConnTimeout(conn_param.conn_timeout);
     t_socket->setRecvTimeout(conn_param.sock_timeout);
 
+    transport_ptr_->open();
+
   } catch (const std::exception &e) {
     LOG_ERROR << "create thrift client exception: " << e.what()
               << ", connect param: " << conn_param.ToString();
