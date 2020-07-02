@@ -69,12 +69,13 @@ class ZKChildrenWatcher {
       const std::vector<std::string> &a);
 
   template <class P>
-  static void UpdateVector(
-      std::vector<P> &items, boost::shared_mutex &items_mtx,
-      std::vector<std::string> &origin, std::vector<std::string> &add,
-      std::vector<std::string> &del,
-      std::function<P(const std::string &)> builder = nullptr,
-      bool debug = true);
+  static void UpdateVector(std::vector<P> &items,
+                           boost::shared_mutex &items_mtx,
+                           std::vector<std::string> &origin,
+                           std::vector<std::string> &add,
+                           std::vector<std::string> &del,
+                           std::function<P(const std::string &)> builder,
+                           const P invalid_item, bool debug = true);
 
   static void UpdateNodeList(std::vector<std::string> &items,
                              boost::shared_mutex &items_mtx,
@@ -316,7 +317,8 @@ void ZKChildrenWatcher<T>::UpdateVector(
     std::vector<P> &items, boost::shared_mutex &items_mtx,
     std::vector<std::string> &origin, std::vector<std::string> &add,
     std::vector<std::string> &del,
-    std::function<P(const std::string &)> builder, bool debug) {
+    std::function<P(const std::string &)> builder, const P invalid_item,
+    bool debug) {
   std::vector<P> additional_items;
   for (auto &value : add) {
     if (value.empty()) {
@@ -325,6 +327,7 @@ void ZKChildrenWatcher<T>::UpdateVector(
       continue;
     }
     if (builder) {
+      // todo 检查有效性
       additional_items.emplace_back(builder(value));
       LOG_INFO << "add new item ok: " << value;
     } else {
@@ -346,14 +349,20 @@ void ZKChildrenWatcher<T>::UpdateVector(
 
     auto finder = VectorToUSet(del);
     for (size_t i = 0; i < tmp_size;) {
-      if (finder.count(origin[i]) > 0)
+      if (finder.count(origin[i]) > 0) {
         items[i] = std::move(items[--tmp_size]);
-      else
+        items[tmp_size] = invalid_item;
+#ifdef DEBUG
+        LOG_SPCL << "set items[" << tmp_size << "] invalid";
+#endif
+      } else {
         ++i;
+      }
     }
     items.resize(tmp_size);
+    items.shrink_to_fit();
     if (debug) {
-      LOG_SPCL << "delete " << old_size - old_size + 1 << " item(s)";
+      LOG_SPCL << "delete " << old_size - tmp_size << " item(s)";
     }
   }
 
@@ -387,8 +396,9 @@ void ZKChildrenWatcher<T>::UpdateNodeList(std::vector<std::string> &items,
         ++i;
     }
     items.resize(tmp_size);
+    items.shrink_to_fit();
     if (debug) {
-      LOG_SPCL << "delete " << old_size - old_size + 1 << " node(s)";
+      LOG_SPCL << "delete " << old_size - tmp_size << " node(s)";
     }
   }
 

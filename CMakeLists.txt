@@ -9,6 +9,7 @@ set(SRC_ROOT "${CMAKE_SOURCE_DIR}")
 set(DEPEND_INC "/usr/local/include")
 set(DEPEND_LIB "/usr/local/lib")
 
+add_definitions(-DDEBUG)
 
 include_directories(${SRC_ROOT}/connection)
 include_directories(${SRC_ROOT}/pool)

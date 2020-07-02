@@ -62,7 +62,6 @@ class ConnectionPool : public std::enable_shared_from_this<ConnectionPool<T>> {
   };
 
   std::atomic<int> borrowed_count_;
-  std::shared_ptr<Deleter> deleter_ptr_;
 };
 
 template <class T>
@@ -89,19 +88,9 @@ ConnectionPool<T>::~ConnectionPool() {
   for (auto p : pool_) {
     factory_->Destroy(p);
   }
+  LOG_SPCL << "connection pool destroy ok, "
+           << conn_pool_param_.conn_param.ToString();
 };
-
-template <class T>
-void ConnectionPool<T>::Init() {
-  deleter_ptr_.reset(new Deleter(this->shared_from_this()));
-  if (deleter_ptr_) {
-    LOG_SPCL << "connection pool init ok: "
-             << conn_pool_param_.conn_param.ToString();
-  } else {
-    LOG_ERROR << "connection pool init failed, exit!";
-    _exit(-1);
-  }
-}
 
 template <class T>
 std::shared_ptr<T> ConnectionPool<T>::Borrow() {
@@ -113,7 +102,7 @@ std::shared_ptr<T> ConnectionPool<T>::Borrow() {
       conn = pool_.front();
       pool_.pop_front();
       ++borrowed_count_;
-      return std::shared_ptr<T>(conn, *deleter_ptr_);
+      return std::shared_ptr<T>(conn, Deleter(this->shared_from_this()));
     }
   }
 
@@ -128,7 +117,7 @@ std::shared_ptr<T> ConnectionPool<T>::Borrow() {
     LOG_ERROR << "no available connection!";
   }
 
-  return std::shared_ptr<T>(conn, *deleter_ptr_);
+  return std::shared_ptr<T>(conn, Deleter(this->shared_from_this()));
 };
 
 template <class T>
@@ -146,6 +135,10 @@ void ConnectionPool<T>::Release(T *conn) {
     LOG_ERROR << "connection is nullptr!";
   }
   --borrowed_count_;
+
+#ifdef DEBUG
+  LOG_SPCL << "release, borrowd count: " << borrowed_count_;
+#endif
 };
 
 template <class T>

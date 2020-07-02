@@ -52,7 +52,7 @@ MultiConnectionPool<CONN, FACTORY>::CreatePool(const std::string &target) {
     conn_pool_ptr =
         std::make_shared<ConnectionPool<CONN>>(factory, conn_pool_param);
     if (conn_pool_ptr) {
-      conn_pool_ptr->Init();
+      LOG_SPCL << "create connection pool ok";
     } else {
       LOG_ERROR << "create connection pool error, nullptr!";
     }
@@ -71,22 +71,22 @@ MultiConnectionPool<CONN, FACTORY>::MultiConnectionPool(
   this->Init();
 
   for (int i = 0; i < multi_conn_pool_param.retry; ++i) {
-    boost::shared_lock<boost::shared_mutex> g(this->node_value_list_smtx_);
-
-    if (this->node_value_list_.empty()) {
+    boost::shared_lock<boost::shared_mutex> g(pools_smtx_);
+    if (pools_.empty()) {
       g.unlock();
       usleep(200000);
       continue;
     } else {
-      for (auto &value : this->node_value_list_) {
-        auto pool = CreatePool(value);
-        if (pool) {
-          pools_.emplace_back(std::move(pool));
-          LOG_INFO << "init pool ok: " << value;
-        } else {
-          LOG_ERROR << "init pool error: " << value;
-        }
-      }
+      LOG_WARN << "wait to init multi connection pool ...";
+    }
+  }
+
+  {
+    boost::shared_lock<boost::shared_mutex> g(pools_smtx_);
+    if (pools_.empty()) {
+      LOG_ERROR << "init multi connection pool failed";
+    } else {
+      LOG_SPCL << "init multi connection pool count: " << pools_.size();
     }
   }
 }
@@ -95,6 +95,8 @@ MultiConnectionPool<CONN, FACTORY>::MultiConnectionPool(
 
 template <class CONN, class FACTORY>
 void MultiConnectionPool<CONN, FACTORY>::ZKChildrenHandler() {
+  static std::shared_ptr<ConnectionPool<CONN>> invalid_pool = nullptr;
+
   // 先删除， 后追加
   if (!this->additional_value_list_.empty() ||
       !this->deleted_value_list_.empty()) {
@@ -104,7 +106,7 @@ void MultiConnectionPool<CONN, FACTORY>::ZKChildrenHandler() {
 
     this->UpdateVector(pools_, pools_smtx_, this->node_value_list_,
                        this->additional_value_list_, this->deleted_value_list_,
-                       builder);
+                       builder, invalid_pool);
 
     if (pools_.empty()) {
       LOG_WARN << "pools empty!";
