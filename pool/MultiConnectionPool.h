@@ -15,59 +15,39 @@ namespace ww {
 struct MultiConnectionPoolParam {
   ConnectionPoolParam conn_pool_param;
   ZKConfig zk_config;
-  int retry;
+  int retry;  // wait retry times to init pools
 };
 
-template <class CONN, class FACTORY>
+template <class C, class F>
 class MultiConnectionPool
-    : public ZKChildrenWatcher<MultiConnectionPool<CONN, FACTORY>> {
-  using ZKType = ZKChildrenWatcher<MultiConnectionPool<CONN, FACTORY>>;
+    : public ZKChildrenWatcher<MultiConnectionPool<C, F>> {
+  using ZKType = ZKChildrenWatcher<MultiConnectionPool<C, F>>;
 
  public:
   MultiConnectionPool(const MultiConnectionPoolParam &multi_conn_pool_param);
 
   void ZKChildrenHandler();
 
-  virtual std::shared_ptr<CONN> GetNextConn() = 0;
+  virtual std::shared_ptr<C> GetNextConn() = 0;
 
  protected:
-  std::shared_ptr<ConnectionPool<CONN>> CreatePool(const std::string &target);
-
   boost::shared_mutex pools_smtx_;
-  std::vector<std::shared_ptr<ConnectionPool<CONN>>> pools_;
+  std::vector<std::shared_ptr<ConnectionPool<C>>> pools_;
   ConnectionPoolParam conn_pool_param_;
+  ConnectionPoolFactory<C, F> factory_;
 };
 
-template <class CONN, class FACTORY>
-std::shared_ptr<ConnectionPool<CONN>>
-MultiConnectionPool<CONN, FACTORY>::CreatePool(const std::string &target) {
-  std::shared_ptr<ConnectionPool<CONN>> conn_pool_ptr = nullptr;
-  try {
-    auto ip_port = this->Split(target);
-    auto conn_pool_param = conn_pool_param_;
-    conn_pool_param.conn_param.ip = ip_port.at(0);
-    conn_pool_param.conn_param.port = std::stod(ip_port.at(1));
-
-    auto factory = std::make_shared<FACTORY>();
-    conn_pool_ptr =
-        std::make_shared<ConnectionPool<CONN>>(factory, conn_pool_param);
-    if (conn_pool_ptr) {
-      LOG_SPCL << "create connection pool ok";
-    } else {
-      LOG_ERROR << "create connection pool error, nullptr!";
-    }
-  } catch (const std::exception &e) {
-    LOG_ERROR << "create connection pool exception: " << e.what();
-  }
-
-  return conn_pool_ptr;
-}
-
-template <class CONN, class FACTORY>
-MultiConnectionPool<CONN, FACTORY>::MultiConnectionPool(
+template <class C, class F>
+MultiConnectionPool<C, F>::MultiConnectionPool(
     const MultiConnectionPoolParam &multi_conn_pool_param)
     : ZKType(multi_conn_pool_param.zk_config),
       conn_pool_param_(multi_conn_pool_param.conn_pool_param) {
+  if (conn_pool_param_.init_size < 1) {
+    LOG_WARN << "invalid conn pool init size: " << conn_pool_param_.init_size
+             << ", set default value: 1";
+    conn_pool_param_.init_size = 1;
+  }
+
   this->Init();
 
   for (int i = 0; i < multi_conn_pool_param.retry; ++i) {
@@ -78,6 +58,7 @@ MultiConnectionPool<CONN, FACTORY>::MultiConnectionPool(
       continue;
     } else {
       LOG_WARN << "wait to init multi connection pool ...";
+      break;
     }
   }
 
@@ -93,26 +74,22 @@ MultiConnectionPool<CONN, FACTORY>::MultiConnectionPool(
 
 // todo try catch
 
-template <class CONN, class FACTORY>
-void MultiConnectionPool<CONN, FACTORY>::ZKChildrenHandler() {
-  static std::shared_ptr<ConnectionPool<CONN>> invalid_pool = nullptr;
-
+template <class C, class F>
+void MultiConnectionPool<C, F>::ZKChildrenHandler() {
   // 先删除， 后追加
   if (!this->additional_value_list_.empty() ||
       !this->deleted_value_list_.empty()) {
-    std::function<std::shared_ptr<ConnectionPool<CONN>>(const std::string &)>
-        builder = std::bind(&MultiConnectionPool<CONN, FACTORY>::CreatePool,
-                            this, std::placeholders::_1);
-
-    this->UpdateVector(pools_, pools_smtx_, this->node_value_list_,
-                       this->additional_value_list_, this->deleted_value_list_,
-                       builder, invalid_pool);
+    this->template UpdateAbstractNodes<ConnectionPoolFactory<C, F>,
+                                       ConnectionPool<C>, ConnectionPoolParam>(
+        pools_, pools_smtx_, this->node_value_list_,
+        this->additional_value_list_, this->deleted_value_list_, factory_,
+        conn_pool_param_);
 
     if (pools_.empty()) {
       LOG_WARN << "pools empty!";
     } else {
       LOG_SPCL
-          << "handle changed zk nodes(corresponding pools) ok, pool count: "
+          << "handle changed zk nodes(in corresponding pools) ok, pool count: "
           << pools_.size();
     }
   } else {

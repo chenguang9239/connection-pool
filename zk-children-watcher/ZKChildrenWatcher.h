@@ -11,6 +11,7 @@
 #include <memory>
 #include <unordered_set>
 
+#include "AbstractNode.h"
 #include "ZKConfig.h"
 #include "log.h"
 
@@ -68,21 +69,20 @@ class ZKChildrenWatcher {
   static std::unordered_set<std::string> VectorToUSet(
       const std::vector<std::string> &a);
 
-  template <class P>
-  static void UpdateVector(std::vector<P> &items,
-                           boost::shared_mutex &items_mtx,
-                           std::vector<std::string> &origin,
-                           std::vector<std::string> &add,
-                           std::vector<std::string> &del,
-                           std::function<P(const std::string &)> builder,
-                           const P invalid_item, bool debug = true);
+  template <class F, class N, class P>
+  static void UpdateAbstractNodes(
+      std::vector<std::shared_ptr<N>> &abs_nodes,
+      boost::shared_mutex &abs_nodes_mtx, std::vector<std::string> &origin,
+      std::vector<std::string> &add, std::vector<std::string> &del,
+      AbstractNodeFactory<F, N, P> &abs_node_factory, const P &abs_node_param,
+      bool debug = true);
 
-  static void UpdateNodeList(std::vector<std::string> &items,
-                             boost::shared_mutex &items_mtx,
-                             std::vector<std::string> &add,
-                             std::vector<std::string> &del, bool debug = true);
+  static void UpdateNodes(std::vector<std::string> &abs_nodes,
+                          boost::shared_mutex &abs_nodes_mtx,
+                          std::vector<std::string> &add,
+                          std::vector<std::string> &del, bool debug = true);
 
-  static std::vector<std::string> Split(const std::string &items,
+  static std::vector<std::string> Split(const std::string &target,
                                         const std::string &with = ":");
 
   ZKConfig config_;
@@ -212,8 +212,8 @@ void ZKChildrenWatcher<T>::InitValueList() {
 
   if (!additional_value_list_.empty() || !deleted_value_list_.empty()) {
     // 先删除， 后追加
-    UpdateNodeList(node_value_list_, node_value_list_smtx_,
-                   additional_value_list_, deleted_value_list_);
+    UpdateNodes(node_value_list_, node_value_list_smtx_, additional_value_list_,
+                deleted_value_list_);
   }
 
   LOG_SPCL << "zkPath: " << config_.path
@@ -312,91 +312,98 @@ std::unordered_set<std::string> ZKChildrenWatcher<T>::VectorToUSet(
 }
 
 template <class T>
-template <class P>
-void ZKChildrenWatcher<T>::UpdateVector(
-    std::vector<P> &items, boost::shared_mutex &items_mtx,
-    std::vector<std::string> &origin, std::vector<std::string> &add,
-    std::vector<std::string> &del,
-    std::function<P(const std::string &)> builder, const P invalid_item,
+template <class F, class N, class P>
+void ZKChildrenWatcher<T>::UpdateAbstractNodes(
+    std::vector<std::shared_ptr<N>> &abs_nodes,
+    boost::shared_mutex &abs_nodes_mtx, std::vector<std::string> &origin,
+    std::vector<std::string> &add, std::vector<std::string> &del,
+    AbstractNodeFactory<F, N, P> &abs_node_factory, const P &abs_node_param,
     bool debug) {
-  std::vector<P> additional_items;
+  std::vector<std::shared_ptr<N>> additional_abs_nodes;
+  auto abs_node_param_ = abs_node_param;
   for (auto &value : add) {
     if (value.empty()) {
       LOG_ERROR << "zk node value empty! zk node value list size: "
                 << origin.size();
       continue;
     }
-    if (builder) {
-      // todo 检查有效性
-      additional_items.emplace_back(builder(value));
-      LOG_INFO << "add new item ok: " << value;
+
+    auto ip_port = Split(value);
+    if (ip_port.size() > 1) {
+      abs_node_param_.conn_param.ip = ip_port.at(0);
+      abs_node_param_.conn_param.port = std::stod(ip_port.at(1));
     } else {
-      LOG_ERROR << "builder is nullptr!";
+      LOG_ERROR << "invalid node value: " << value << ", skip!";
+      continue;
+    }
+
+    auto new_abs_node = abs_node_factory.Create(abs_node_param_);
+    if (new_abs_node && new_abs_node->IsValid()) {
+      additional_abs_nodes.emplace_back(new_abs_node);
+      LOG_INFO << "create new abs node ok: " << value;
+    } else {
+      LOG_ERROR << "create new abs node failed: " << value;
     }
   }
 
-  if (add.size() != additional_items.size()) {
-    LOG_ERROR << "create new item(s) error, addition node(s) count: "
-              << add.size()
-              << ", additional item(s) count: " << additional_items.size();
+  if (add.size() != additional_abs_nodes.size()) {
+    LOG_ERROR << "create new abs node(s) error, addition node(s) count: "
+              << add.size() << ", additional abs node(s) count: "
+              << additional_abs_nodes.size();
   }
 
-  boost::unique_lock<boost::shared_mutex> g(items_mtx);
+  boost::unique_lock<boost::shared_mutex> g(abs_nodes_mtx);
 
-  if (!items.empty() && !del.empty()) {
-    size_t old_size = items.size();
+  if (!abs_nodes.empty() && !del.empty()) {
+    size_t old_size = abs_nodes.size();
     size_t tmp_size = old_size;
 
     auto finder = VectorToUSet(del);
     for (size_t i = 0; i < tmp_size;) {
       if (finder.count(origin[i]) > 0) {
-        items[i] = std::move(items[--tmp_size]);
-        items[tmp_size] = invalid_item;
-#ifdef DEBUG
-        LOG_SPCL << "set items[" << tmp_size << "] invalid";
-#endif
+        abs_nodes[i] = std::move(abs_nodes[--tmp_size]);
       } else {
         ++i;
       }
     }
-    items.resize(tmp_size);
-    items.shrink_to_fit();
+    abs_nodes.resize(tmp_size);
+    abs_nodes.shrink_to_fit();
     if (debug) {
-      LOG_SPCL << "delete " << old_size - tmp_size << " item(s)";
+      LOG_SPCL << "delete " << old_size - tmp_size << " abs node(s)";
     }
   }
 
-  if (!additional_items.empty()) {
-    size_t append_size = additional_items.size();
-    std::move(additional_items.begin(), additional_items.end(),
-              std::inserter(items, items.end()));
+  if (!additional_abs_nodes.empty()) {
+    size_t append_size = additional_abs_nodes.size();
+    std::move(additional_abs_nodes.begin(), additional_abs_nodes.end(),
+              std::inserter(abs_nodes, abs_nodes.end()));
     if (debug) {
-      LOG_SPCL << "append " << append_size << " new item(s)";
+      LOG_SPCL << "append " << append_size << " new abs node(s)";
     }
   }
 }
 
 template <class T>
-void ZKChildrenWatcher<T>::UpdateNodeList(std::vector<std::string> &items,
-                                          boost::shared_mutex &items_mtx,
-                                          std::vector<std::string> &add,
-                                          std::vector<std::string> &del,
-                                          bool debug) {
-  boost::unique_lock<boost::shared_mutex> g(items_mtx);
+void ZKChildrenWatcher<T>::UpdateNodes(std::vector<std::string> &abs_nodes,
+                                       boost::shared_mutex &abs_nodes_mtx,
+                                       std::vector<std::string> &add,
+                                       std::vector<std::string> &del,
+                                       bool debug) {
+  boost::unique_lock<boost::shared_mutex> g(abs_nodes_mtx);
 
-  if (!items.empty() && !del.empty()) {
-    size_t old_size = items.size();
+  if (!abs_nodes.empty() && !del.empty()) {
+    size_t old_size = abs_nodes.size();
     size_t tmp_size = old_size;
 
     auto finder = VectorToUSet(del);
     for (size_t i = 0; i < tmp_size;) {
-      if (finder.count(items[i]) > 0)
-        items[i] = std::move(items[--tmp_size]);
+      if (finder.count(abs_nodes[i]) > 0)
+        abs_nodes[i] = std::move(abs_nodes[--tmp_size]);
       else
         ++i;
     }
-    items.resize(tmp_size);
-    items.shrink_to_fit();
+    abs_nodes.resize(tmp_size);
+    abs_nodes.shrink_to_fit();
     if (debug) {
       LOG_SPCL << "delete " << old_size - tmp_size << " node(s)";
     }
@@ -404,7 +411,8 @@ void ZKChildrenWatcher<T>::UpdateNodeList(std::vector<std::string> &items,
 
   if (!add.empty()) {
     size_t append_size = add.size();
-    std::move(add.begin(), add.end(), std::inserter(items, items.end()));
+    std::move(add.begin(), add.end(),
+              std::inserter(abs_nodes, abs_nodes.end()));
     if (debug) {
       LOG_SPCL << "append " << append_size << " new node(s)";
     }

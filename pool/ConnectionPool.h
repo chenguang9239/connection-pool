@@ -6,6 +6,7 @@
 #include <set>
 #include <string>
 
+#include "AbstractNode.h"
 #include "Connection.h"
 #include "log.h"
 
@@ -23,11 +24,12 @@ struct ConnectionPoolParam {
   ConnectionParam conn_param;
   int init_size;
   int max_size;
-  int retry;
+  int retry;  // times of repeating to create connection failed
 };
 
 template <class T>
-class ConnectionPool : public std::enable_shared_from_this<ConnectionPool<T>> {
+class ConnectionPool : public std::enable_shared_from_this<ConnectionPool<T>>,
+                       public AbstractNode {
  public:
   ConnectionPool(const std::shared_ptr<ConnectionFactory<T>> factory,
                  const ConnectionPoolParam &conn_pool_param);
@@ -39,6 +41,8 @@ class ConnectionPool : public std::enable_shared_from_this<ConnectionPool<T>> {
   void Release(T *conn);
 
   ConnectionPoolStats get_stats();
+
+  virtual bool IsValid();
 
   void Init();
 
@@ -70,17 +74,28 @@ ConnectionPool<T>::ConnectionPool(
     const ConnectionPoolParam &conn_pool_param)
     : factory_(factory), conn_pool_param_(conn_pool_param) {
   borrowed_count_ = 0;
-  while (pool_.size() < conn_pool_param_.init_size) {
-    auto p = factory_->Create(conn_pool_param_.conn_param);
-    if (p) {
-      pool_.emplace_back(p);
-    } else {
-      LOG_ERROR << "init connection error: "
-                << conn_pool_param_.conn_param.ToString();
-    }
-    LOG_INFO << "init " << pool_.size()
-             << " connections: " << conn_pool_param_.conn_param.ToString();
+
+  if (conn_pool_param_.init_size < 1) {
+    LOG_WARN << "invalid conn pool init size: " << conn_pool_param_.init_size
+             << ", set default value: 1";
+    conn_pool_param_.init_size = 1;
   }
+
+  for (int i = 0; i < conn_pool_param_.init_size; ++i) {
+    for (int j = 0; j < conn_pool_param_.retry; ++j) {
+      auto p = factory_->Create(conn_pool_param_.conn_param);
+      if (p && p->IsOK()) {
+        pool_.emplace_back(p);
+        break;
+      } else {
+        LOG_ERROR << "init connection error: "
+                  << conn_pool_param_.conn_param.ToString();
+      }
+    }
+  }
+
+  LOG_INFO << "init " << pool_.size()
+           << " connections: " << conn_pool_param_.conn_param.ToString();
 };
 
 template <class T>
@@ -88,8 +103,8 @@ ConnectionPool<T>::~ConnectionPool() {
   for (auto p : pool_) {
     factory_->Destroy(p);
   }
-  LOG_SPCL << "connection pool destroy ok, "
-           << conn_pool_param_.conn_param.ToString();
+  LOG_SPCL << "destroy " << pool_.size()
+           << " connections: " << conn_pool_param_.conn_param.ToString();
 };
 
 template <class T>
@@ -146,5 +161,43 @@ ConnectionPoolStats ConnectionPool<T>::get_stats() {
   std::lock_guard<std::mutex> lock(mtx_);
   return ConnectionPoolStats(pool_.size(), borrowed_count_);
 };
+
+template <class T>
+bool ConnectionPool<T>::IsValid() {
+  std::lock_guard<std::mutex> lock(mtx_);
+  return !pool_.empty();
+}
+
+template <class C, class F>
+class ConnectionPoolFactory
+    : public AbstractNodeFactory<ConnectionPoolFactory<C, F>, ConnectionPool<C>,
+                                 ConnectionPoolParam> {
+ public:
+  std::shared_ptr<ConnectionPool<C>> Create(const ConnectionPoolParam &param);
+};
+
+template <class C, class F>
+std::shared_ptr<ConnectionPool<C>> ConnectionPoolFactory<C, F>::Create(
+    const ConnectionPoolParam &conn_pool_param) {
+  std::shared_ptr<ConnectionPool<C>> conn_pool_ptr = nullptr;
+  try {
+    auto factory = std::make_shared<F>();
+    conn_pool_ptr =
+        std::make_shared<ConnectionPool<C>>(factory, conn_pool_param);
+    if (conn_pool_ptr && conn_pool_ptr->get_stats().pool_size > 0) {
+      LOG_SPCL << "create connection pool ok";
+    } else {
+      LOG_ERROR
+          << "create connection pool error, nullptr or empty! conn count: "
+          << conn_pool_ptr->get_stats().pool_size;
+      conn_pool_ptr = nullptr;
+    }
+  } catch (const std::exception &e) {
+    LOG_ERROR << "create connection pool exception: " << e.what();
+    conn_pool_ptr = nullptr;
+  }
+
+  return conn_pool_ptr;
+}
 
 }  // namespace ww
